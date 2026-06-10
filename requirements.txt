@@ -5,3 +5,4 @@ langchain-community
 python-dotenv
 streamlit
 groq
+langsmith
