@@ -8,3 +8,5 @@ groq
 langsmith
 fpdf2
 python-docx
+pypdf
+ddgs
