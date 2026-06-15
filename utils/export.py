@@ -31,22 +31,27 @@ def _latin1(text: str) -> str:
     return text.encode("latin-1", errors="replace").decode("latin-1")
 
 
-def to_pdf(text: str) -> bytes:
+def to_pdf(text: str, doc_type: str = "") -> bytes:
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
+
+    if doc_type:
+        pdf.set_font("Helvetica", style="B", size=18)
+        pdf.multi_cell(0, 10, _latin1(doc_type))
+        pdf.ln(4)
 
     for kind, content in _parse_lines(text):
         if kind == "blank":
             pdf.ln(3)
         elif kind == "heading":
             level, title = content
-            pdf.set_font("Helvetica", style="B", size=max(11, 18 - level * 2))
+            pdf.set_font("Helvetica", style="B", size=max(11, 16 - level * 2))
             pdf.multi_cell(0, 7, _latin1(title))
             pdf.ln(1)
         elif kind == "bullet":
             pdf.set_font("Helvetica", size=11)
-            pdf.multi_cell(0, 6, _latin1(f"-  {content}"))
+            pdf.multi_cell(0, 6, _latin1(f"  •  {content}"))
         else:
             pdf.set_font("Helvetica", size=11)
             pdf.multi_cell(0, 6, _latin1(content))
@@ -54,8 +59,11 @@ def to_pdf(text: str) -> bytes:
     return bytes(pdf.output())
 
 
-def to_docx(text: str) -> bytes:
+def to_docx(text: str, doc_type: str = "") -> bytes:
     doc = Document()
+
+    if doc_type:
+        doc.add_heading(doc_type, 0)
 
     for kind, content in _parse_lines(text):
         if kind == "blank":

@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — DocMind AI{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto">
+  <h2 class="text-2xl font-bold text-slate-800 mb-1">Welcome back, {{ current_user.name }} 👋</h2>
+  <p class="text-slate-500 mb-8">Here's an overview of your workspace.</p>
+
+  <!-- Stats -->
+  <div class="grid grid-cols-1 sm:grid-cols-3 gap-5 mb-10">
+    <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+      <p class="text-sm text-slate-500 mb-1">Total Documents</p>
+      <p class="text-3xl font-bold text-blue-600">{{ doc_count }}</p>
+    </div>
+    <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+      <p class="text-sm text-slate-500 mb-1">Collections</p>
+      <p class="text-3xl font-bold text-violet-600">{{ collection_count }}</p>
+    </div>
+    <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+      <p class="text-sm text-slate-500 mb-1">Member Since</p>
+      <p class="text-xl font-semibold text-slate-700">{{ current_user.created_at.strftime('%b %Y') }}</p>
+    </div>
+  </div>
+
+  <!-- Quick actions -->
+  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-10">
+    <a href="{{ url_for('documents.generate') }}"
+       class="flex items-center gap-4 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl p-6 transition shadow">
+      <span class="text-3xl">✍️</span>
+      <div>
+        <p class="font-semibold text-lg">Generate Document</p>
+        <p class="text-blue-200 text-sm">PRD, SRS, BRD, Technical Design & more</p>
+      </div>
+    </a>
+    <a href="{{ url_for('rag.chat_page') }}"
+       class="flex items-center gap-4 bg-violet-600 hover:bg-violet-700 text-white rounded-2xl p-6 transition shadow">
+      <span class="text-3xl">💬</span>
+      <div>
+        <p class="font-semibold text-lg">RAG Chat</p>
+        <p class="text-violet-200 text-sm">Ask questions across your knowledge base</p>
+      </div>
+    </a>
+  </div>
+
+  <!-- Recent documents -->
+  <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+    <div class="flex items-center justify-between mb-5">
+      <h3 class="font-semibold text-slate-800">Recent Documents</h3>
+      <a href="{{ url_for('documents.history') }}" class="text-sm text-blue-600 hover:underline">View all</a>
+    </div>
+
+    {% if recent_docs %}
+      <div class="space-y-3">
+        {% for doc in recent_docs %}
+          <div class="flex items-center justify-between py-3 border-b border-slate-50 last:border-0">
+            <div>
+              <p class="font-medium text-slate-800">{{ doc.title }}</p>
+              <p class="text-xs text-slate-400 mt-0.5">
+                {{ doc.doc_type }} · {{ doc.created_at.strftime('%d %b %Y, %H:%M') }}
+              </p>
+            </div>
+            <div class="flex gap-2">
+              <a href="{{ url_for('documents.export_pdf', doc_id=doc.id) }}"
+                 class="text-xs px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg transition">PDF</a>
+              <a href="{{ url_for('documents.export_docx', doc_id=doc.id) }}"
+                 class="text-xs px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg transition">DOCX</a>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="text-center py-10 text-slate-400">
+        <p class="text-4xl mb-3">📄</p>
+        <p>No documents yet.</p>
+        <a href="{{ url_for('documents.generate') }}" class="text-blue-600 text-sm hover:underline mt-1 block">
+          Generate your first document →
+        </a>
+      </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

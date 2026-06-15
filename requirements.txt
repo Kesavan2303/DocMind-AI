@@ -10,3 +10,12 @@ fpdf2
 python-docx
 pypdf
 ddgs
+langgraph
+chromadb
+sentence-transformers
+docx2txt
+flask
+flask-login
+flask-sqlalchemy
+flask-wtf
+email-validator

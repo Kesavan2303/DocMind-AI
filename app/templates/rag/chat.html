@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block title %}RAG Chat — DocMind AI{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto flex flex-col h-[calc(100vh-6rem)]">
+
+  <!-- Header -->
+  <div class="flex items-center gap-4 mb-4">
+    <h2 class="text-xl font-bold text-slate-800 mr-auto">💬 RAG Knowledge Chat</h2>
+    <select id="collectionSelect"
+            class="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 bg-white">
+      <option value="">— Select a collection —</option>
+      {% for col in collections %}
+        <option value="{{ col.id }}"
+          {% if col.id == default_id or request.args.get('col')|int == col.id %}selected{% endif %}>
+          📚 {{ col.name }} ({{ col.file_count }} files)
+        </option>
+      {% endfor %}
+    </select>
+    {% if not collections %}
+      <a href="{{ url_for('rag.collections') }}"
+         class="text-sm text-violet-600 hover:underline">Create a collection first →</a>
+    {% endif %}
+  </div>
+
+  <!-- Chat area -->
+  <div id="chatMessages"
+       class="flex-1 overflow-y-auto bg-white rounded-2xl border border-slate-200 p-5 space-y-5 mb-4">
+    <div class="text-center text-slate-400 py-16" id="emptyState">
+      <p class="text-5xl mb-3">🔍</p>
+      <p class="font-medium">Ask anything about your documents</p>
+      <p class="text-sm mt-1">Select a collection above and type your question</p>
+    </div>
+  </div>
+
+  <!-- Sources panel -->
+  <div id="sourcesPanel" class="hidden bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4 text-sm">
+    <p class="font-semibold text-amber-800 mb-1">📎 Sources retrieved</p>
+    <div id="sourcesList" class="space-y-1 text-amber-700"></div>
+  </div>
+
+  <!-- Input -->
+  <div class="flex gap-3 bg-white border border-slate-200 rounded-2xl p-3">
+    <textarea id="chatInput" rows="1"
+              placeholder="Ask a question about your documents…"
+              class="flex-1 resize-none text-sm focus:outline-none max-h-32 overflow-y-auto leading-relaxed"
+              onkeydown="handleKey(event)"
+              oninput="this.style.height='auto';this.style.height=this.scrollHeight+'px'"></textarea>
+    <button onclick="sendQuery()"
+            class="self-end px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-sm font-medium transition">
+      Ask
+    </button>
+  </div>
+</div>
+
+<script>
+  const CSRF = document.querySelector('meta[name="csrf-token"]').content;
+
+  function getMessages() { return document.getElementById('chatMessages'); }
+
+  function appendMessage(role, content) {
+    const empty = document.getElementById('emptyState');
+    if (empty) empty.remove();
+
+    const wrap = document.createElement('div');
+    wrap.className = `flex ${role === 'user' ? 'justify-end' : 'justify-start'} chat-bubble`;
+
+    const bubble = document.createElement('div');
+    bubble.className = role === 'user'
+      ? 'max-w-[70%] bg-violet-600 text-white rounded-2xl rounded-br-sm px-4 py-3 text-sm'
+      : 'max-w-[85%] bg-slate-50 border border-slate-200 rounded-2xl rounded-bl-sm px-4 py-3 text-sm prose';
+
+    if (role === 'user') {
+      bubble.textContent = content;
+    } else {
+      bubble.innerHTML = content ? marked.parse(content) : '<span class="text-slate-400 animate-pulse">Searching…</span>';
+    }
+
+    wrap.appendChild(bubble);
+    getMessages().appendChild(wrap);
+    getMessages().scrollTop = getMessages().scrollHeight;
+    return bubble;
+  }
+
+  async function sendQuery() {
+    const input = document.getElementById('chatInput');
+    const query = input.value.trim();
+    const collectionId = document.getElementById('collectionSelect').value;
+
+    if (!query) return;
+    if (!collectionId) { alert('Please select a collection first.'); return; }
+
+    input.value = '';
+    input.style.height = 'auto';
+    input.disabled = true;
+    document.getElementById('sourcesPanel').classList.add('hidden');
+
+    appendMessage('user', query);
+    const bubble = appendMessage('assistant', '');
+
+    const res = await fetch('/rag/chat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF},
+      body: JSON.stringify({query, collection_id: collectionId})
+    });
+
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    let full = '';
+
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, {stream: true});
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const d = JSON.parse(line.slice(6));
+          if (d.text) {
+            full += d.text;
+            bubble.innerHTML = marked.parse(full);
+            getMessages().scrollTop = getMessages().scrollHeight;
+          }
+          if (d.done && d.sources && d.sources.length > 0) {
+            showSources(d.sources);
+          }
+        } catch {}
+      }
+    }
+
+    input.disabled = false;
+    input.focus();
+  }
+
+  function showSources(sources) {
+    const panel = document.getElementById('sourcesPanel');
+    const list  = document.getElementById('sourcesList');
+    list.innerHTML = '';
+    sources.forEach(s => {
+      const item = document.createElement('div');
+      item.className = 'flex items-start gap-2';
+      item.innerHTML = `<span>📄</span><div><strong>${s.filename}</strong><br><span class="text-xs opacity-75">${s.excerpt}</span></div>`;
+      list.appendChild(item);
+    });
+    panel.classList.remove('hidden');
+  }
+
+  function handleKey(e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendQuery(); }
+  }
+</script>
+{% endblock %}

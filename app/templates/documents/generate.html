@@ -1,0 +1,298 @@
+{% extends "base.html" %}
+{% block title %}Generate Document — DocMind AI{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto flex flex-col h-[calc(100vh-6rem)]">
+
+  <!-- Header controls -->
+  <div class="flex flex-wrap items-center gap-3 mb-4">
+    <h2 class="text-xl font-bold text-slate-800 mr-auto">✍️ Generate Document</h2>
+
+    <select id="docTypeSelect"
+            class="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+      {% for dt in doc_types %}
+        <option value="{{ dt }}">{{ dt }}</option>
+      {% endfor %}
+    </select>
+
+    <select id="collectionSelect"
+            class="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+      <option value="">No collection (pure generation)</option>
+      {% for col in collections %}
+        <option value="{{ col.id }}"
+          {% if col.id == default_collection_id %}selected{% endif %}>
+          📚 {{ col.name }} ({{ col.file_count }} files)
+        </option>
+      {% endfor %}
+    </select>
+
+    <button onclick="newDocument()"
+            class="flex items-center gap-1.5 px-4 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-sm font-medium transition">
+      🆕 New
+    </button>
+  </div>
+
+  <!-- Chat messages -->
+  <div id="chatMessages"
+       class="flex-1 overflow-y-auto bg-white rounded-2xl border border-slate-200 p-5 space-y-4 mb-4">
+    <div class="text-center text-slate-400 py-16" id="emptyState">
+      <p class="text-5xl mb-3">📝</p>
+      <p class="font-medium">Tell me what document you need</p>
+      <p class="text-sm mt-1">Select a document type above, then describe your project</p>
+    </div>
+  </div>
+
+  <!-- Export buttons (hidden until doc generated) -->
+  <div id="exportBar" class="hidden flex gap-3 mb-4">
+    <a id="exportPdf" href="#"
+       class="flex-1 text-center px-4 py-2.5 bg-red-500 hover:bg-red-600 text-white rounded-lg text-sm font-medium transition">
+      ⬇ Download PDF
+    </a>
+    <a id="exportDocx" href="#"
+       class="flex-1 text-center px-4 py-2.5 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-sm font-medium transition">
+      ⬇ Download DOCX
+    </a>
+  </div>
+
+  <!-- Input area -->
+  <div class="flex gap-3 bg-white border border-slate-200 rounded-2xl p-3">
+    <label class="flex items-center cursor-pointer px-2 text-slate-400 hover:text-slate-600" title="Attach document">
+      <span class="text-xl">📎</span>
+      <input type="file" id="fileAttach" accept=".pdf,.docx" class="hidden" onchange="handleFileAttach(this)"/>
+    </label>
+    <div class="flex-1 flex flex-col gap-1">
+      <div id="attachedFile" class="hidden text-xs text-blue-600 font-medium px-1"></div>
+      <textarea id="chatInput" rows="1"
+                placeholder="Describe what you need, or ask for section changes after generation…"
+                class="w-full resize-none text-sm focus:outline-none max-h-32 overflow-y-auto leading-relaxed"
+                onkeydown="handleKey(event)"
+                oninput="this.style.height='auto';this.style.height=this.scrollHeight+'px'"></textarea>
+    </div>
+    <button onclick="sendMessage()"
+            class="self-end px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-medium transition">
+      Send
+    </button>
+  </div>
+</div>
+
+<script>
+  const CSRF = document.querySelector('meta[name="csrf-token"]').content;
+  let threadId = "{{ thread_id }}";
+  let currentDocId = null;
+  let currentDoc = "";
+  let attachedFileText = "";
+  let attachedFileName = "";
+  let enhanceHistory = [];
+
+  function getChatMessages() { return document.getElementById('chatMessages'); }
+
+  function appendMessage(role, content, streaming=false) {
+    const empty = document.getElementById('emptyState');
+    if (empty) empty.remove();
+
+    const wrap = document.createElement('div');
+    wrap.className = `chat-bubble flex ${role === 'user' ? 'justify-end' : 'justify-start'}`;
+
+    const bubble = document.createElement('div');
+    bubble.className = role === 'user'
+      ? 'max-w-[75%] bg-blue-600 text-white rounded-2xl rounded-br-sm px-4 py-3 text-sm'
+      : 'max-w-[85%] bg-slate-50 border border-slate-200 rounded-2xl rounded-bl-sm px-4 py-3 text-sm prose';
+
+    if (role === 'user') {
+      bubble.textContent = content;
+    } else {
+      bubble.innerHTML = content ? marked.parse(content) : '<span class="text-slate-400 animate-pulse">Thinking…</span>';
+    }
+
+    wrap.appendChild(bubble);
+    getChatMessages().appendChild(wrap);
+    getChatMessages().scrollTop = getChatMessages().scrollHeight;
+    return bubble;
+  }
+
+  async function sendMessage() {
+    const input = document.getElementById('chatInput');
+    const message = input.value.trim();
+    if (!message) return;
+
+    input.value = '';
+    input.style.height = 'auto';
+    input.disabled = true;
+
+    const docType = document.getElementById('docTypeSelect').value;
+    const collectionId = document.getElementById('collectionSelect').value || null;
+
+    // Enhance mode if file attached
+    if (attachedFileText) {
+      appendMessage('user', message);
+      enhanceHistory.push({role: 'user', content: message});
+      const bubble = appendMessage('assistant', '');
+
+      const res = await fetch('/documents/enhance', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF},
+        body: JSON.stringify({message, document_text: attachedFileText, history: enhanceHistory})
+      });
+
+      let full = '';
+      await readStream(res, chunk => {
+        full += chunk;
+        bubble.innerHTML = marked.parse(full);
+        getChatMessages().scrollTop = getChatMessages().scrollHeight;
+      });
+      enhanceHistory.push({role: 'assistant', content: full});
+      currentDoc = full;
+      input.disabled = false;
+      return;
+    }
+
+    appendMessage('user', message);
+    const bubble = appendMessage('assistant', '');
+
+    const res = await fetch('/documents/chat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF},
+      body: JSON.stringify({
+        message, doc_type: docType,
+        thread_id: threadId,
+        collection_id: collectionId,
+        current_document: currentDoc
+      })
+    });
+
+    let full = '';
+    let done = false;
+
+    await readStreamWithDone(res,
+      chunk => {
+        full += chunk;
+        bubble.innerHTML = marked.parse(full);
+        getChatMessages().scrollTop = getChatMessages().scrollHeight;
+      },
+      data => {
+        threadId = data.thread_id || threadId;
+        if (data.has_document && data.doc_id) {
+          currentDocId = data.doc_id;
+          currentDoc = full;
+          showExportButtons(data.doc_id);
+        }
+      }
+    );
+
+    input.disabled = false;
+    input.focus();
+  }
+
+  async function readStream(res, onChunk) {
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, {stream: true});
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const d = JSON.parse(line.slice(6));
+            if (d.text) onChunk(d.text);
+          } catch {}
+        }
+      }
+    }
+  }
+
+  async function readStreamWithDone(res, onChunk, onDone) {
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, {stream: true});
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const d = JSON.parse(line.slice(6));
+            if (d.text) onChunk(d.text);
+            if (d.done) onDone(d);
+          } catch {}
+        }
+      }
+    }
+  }
+
+  function showExportButtons(docId) {
+    document.getElementById('exportBar').classList.remove('hidden');
+    document.getElementById('exportPdf').href  = `/documents/${docId}/export/pdf`;
+    document.getElementById('exportDocx').href = `/documents/${docId}/export/docx`;
+  }
+
+  async function newDocument() {
+    const res = await fetch('/documents/new-thread', {
+      method: 'POST', headers: {'X-CSRFToken': CSRF}
+    });
+    const d = await res.json();
+    threadId = d.thread_id;
+    currentDocId = null;
+    currentDoc = '';
+    attachedFileText = '';
+    attachedFileName = '';
+    enhanceHistory = [];
+    document.getElementById('chatMessages').innerHTML =
+      `<div class="text-center text-slate-400 py-16" id="emptyState">
+        <p class="text-5xl mb-3">📝</p>
+        <p class="font-medium">Tell me what document you need</p>
+        <p class="text-sm mt-1">Select a document type above, then describe your project</p>
+      </div>`;
+    document.getElementById('exportBar').classList.add('hidden');
+    document.getElementById('attachedFile').classList.add('hidden');
+    document.getElementById('attachedFile').textContent = '';
+  }
+
+  async function handleFileAttach(input) {
+    const file = input.files[0];
+    if (!file) return;
+    const fd = new FormData();
+    fd.append('file', file);
+
+    // Read file client-side and send to extract endpoint
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const bytes = new Uint8Array(e.target.result);
+      const blob = new Blob([bytes]);
+      const fd = new FormData();
+      fd.append('file', blob, file.name);
+
+      const res = await fetch('/documents/extract-text', {
+        method: 'POST',
+        headers: {'X-CSRFToken': CSRF},
+        body: fd
+      });
+      const d = await res.json();
+      if (d.text) {
+        attachedFileText = d.text;
+        attachedFileName = file.name;
+        enhanceHistory = [];
+        const label = document.getElementById('attachedFile');
+        label.textContent = `📎 ${file.name} attached`;
+        label.classList.remove('hidden');
+        appendMessage('assistant', `I've loaded **${file.name}**. What would you like me to do with it? I can fill blanks, expand sections, improve tone, add clauses, or enhance the whole document.`);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+    input.value = '';
+  }
+
+  function handleKey(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  }
+</script>
+{% endblock %}

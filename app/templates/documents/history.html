@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Document History — DocMind AI{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto">
+  <div class="flex items-center justify-between mb-6">
+    <h2 class="text-2xl font-bold text-slate-800">📄 Document History</h2>
+    <a href="{{ url_for('documents.generate') }}"
+       class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition">
+      + New Document
+    </a>
+  </div>
+
+  {% if documents %}
+    <div class="bg-white rounded-2xl border border-slate-200 divide-y divide-slate-100 shadow-sm">
+      {% for doc in documents %}
+        <div class="flex items-start justify-between p-5 hover:bg-slate-50 transition" x-data="{open:false}">
+          <div class="flex-1 min-w-0 pr-4">
+            <div class="flex items-center gap-2 mb-1">
+              <span class="inline-block text-xs bg-blue-100 text-blue-700 rounded-full px-2 py-0.5 font-medium">{{ doc.doc_type }}</span>
+              <span class="text-xs text-slate-400">{{ doc.created_at.strftime('%d %b %Y, %H:%M') }}</span>
+            </div>
+            <p class="font-semibold text-slate-800 truncate">{{ doc.title }}</p>
+            <p class="text-sm text-slate-400 mt-1 line-clamp-2">{{ doc.content[:150] }}…</p>
+          </div>
+
+          <div class="flex items-center gap-2 shrink-0">
+            <a href="{{ url_for('documents.export_pdf', doc_id=doc.id) }}"
+               class="text-xs px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg transition">PDF</a>
+            <a href="{{ url_for('documents.export_docx', doc_id=doc.id) }}"
+               class="text-xs px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg transition">DOCX</a>
+            <button onclick="deleteDoc({{ doc.id }}, this)"
+                    class="text-xs px-3 py-1.5 bg-slate-100 hover:bg-red-50 hover:text-red-600 rounded-lg transition">
+              Delete
+            </button>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="text-center py-20 text-slate-400">
+      <p class="text-5xl mb-4">📭</p>
+      <p class="text-lg font-medium">No documents yet</p>
+      <a href="{{ url_for('documents.generate') }}" class="text-blue-600 text-sm hover:underline mt-2 block">
+        Generate your first document →
+      </a>
+    </div>
+  {% endif %}
+</div>
+
+<script>
+  const CSRF = document.querySelector('meta[name="csrf-token"]').content;
+  async function deleteDoc(id, btn) {
+    if (!confirm('Delete this document?')) return;
+    const res = await fetch(`/documents/${id}/delete`, {
+      method: 'POST', headers: {'X-CSRFToken': CSRF}
+    });
+    if ((await res.json()).success) btn.closest('.flex').remove();
+  }
+</script>
+{% endblock %}
